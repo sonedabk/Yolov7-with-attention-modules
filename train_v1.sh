@@ -1,0 +1,2 @@
+export CUDA_VISIBLE_DEVICES=2
+python train.py --workers 2 --device 2 --batch-size 16 --epochs 200 --data ./visdrone_dataset.yaml --img 640 640 --cfg cfg/training/yolov7-tiny-mod-v1.yaml --weights '' --hyp data/hyp.scratch.tiny.yaml
