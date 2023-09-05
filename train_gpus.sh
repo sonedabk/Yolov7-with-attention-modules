@@ -1,2 +1,2 @@
 # nproc_per_node = số lượn cuda sử dụn
-export CUDA_VISIBLE_DEVICES=2,3 && python -m torch.distributed.launch --nproc_per_node 2 --master_port 9527 train.py --device 2,3 --sync-bn --label-smoothing 0.1 --workers 8 --batch-size 32 --epochs 500 --data ./visdrone_dataset.yaml --img 640 640 --cfg cfg/training/yolov7-tiny-cbam.yaml --weights '' --hyp data/hyp.scratch.tiny.yaml
+export CUDA_VISIBLE_DEVICES=2,3 && python -m torch.distributed.launch --nproc_per_node 2 --master_port 9527 train.py --device 2,3 --sync-bn --label-smoothing 0.1 --workers  --batch-size 32 --epochs 500 --data ./visdrone_dataset.yaml --img 640 640 --cfg cfg/training/yolov7-tiny-cbam.yaml --weights '' --hyp data/hyp.scratch.tiny.yaml
