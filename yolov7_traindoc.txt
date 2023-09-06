@@ -1,2 +1,1 @@
-python train.py --workers 2 --device 1 --batch-size 16 --epochs 200 --data ./visdrone_dataset.yaml --img 640 640 --cfg cfg/training/yolov7-tiny.yaml --weights ./yolov7-tiny.pt --hyp data/hyp.scratch.tiny.yaml
-
+python train.py --workers 8 --device 1 --batch-size 16 --epochs 200 --data ./visdrone_dataset.yaml --img 640 640 --cfg cfg/training/yolov7.yaml --weights ./yolov7.pt
