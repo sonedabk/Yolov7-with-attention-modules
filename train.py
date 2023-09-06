@@ -34,6 +34,7 @@ from utils.loss import ComputeLoss, ComputeLossOTA
 from utils.plots import plot_images, plot_labels, plot_results, plot_evolution
 from utils.torch_utils import ModelEMA, select_device, intersect_dicts, torch_distributed_zero_first, is_parallel
 from utils.wandb_logging.wandb_utils import WandbLogger, check_wandb_resume
+from models.common import CBAM
 
 logger = logging.getLogger(__name__)
 
@@ -274,9 +275,13 @@ def train(hyp, opt, device, tb_writer=None):
 
     # DDP mode
     if cuda and rank != -1:
+        condition = any(
+            (isinstance(layer, nn.MultiheadAttention) or isinstance(layer, CBAM))
+            for layer in model.modules()
+        )
         model = DDP(model, device_ids=[opt.local_rank], output_device=opt.local_rank,
                     # nn.MultiheadAttention incompatibility with DDP https://github.com/pytorch/pytorch/issues/26698
-                    find_unused_parameters=any(isinstance(layer, nn.MultiheadAttention) for layer in model.modules()))
+                    find_unused_parameters=condition)
 
     # Model parameters
     hyp['box'] *= 3. / nl  # scale to layers
