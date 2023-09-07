@@ -42,10 +42,10 @@ backbone:
    [-1, 1, CBAM, [256]],
    
    [-1, 1, MP, []],  # 24-P5/32
-   [-1, 1, Conv, [256, 1, 1, None, 2, nn.LeakyReLU(0.1)]],
-   [-2, 1, Conv, [256, 1, 1, None, 2, nn.LeakyReLU(0.1)]],
-   [-1, 1, Conv, [256, 3, 1, None, 2, nn.LeakyReLU(0.1)]],
-   [-1, 1, Conv, [256, 3, 1, None, 2, nn.LeakyReLU(0.1)]],
+   [-1, 1, Conv, [256, 1, 1, None, 1, nn.LeakyReLU(0.1)]],
+   [-2, 1, Conv, [256, 1, 1, None, 1, nn.LeakyReLU(0.1)]],
+   [-1, 1, Conv, [256, 3, 1, None, 1, nn.LeakyReLU(0.1)]],
+   [-1, 1, Conv, [256, 3, 1, None, 1, nn.LeakyReLU(0.1)]],
    [[-1, -2, -3, -4], 1, Concat, [1]],
    [-1, 1, Conv, [512, 1, 1, None, 1, nn.LeakyReLU(0.1)]],  # 30
   ]
