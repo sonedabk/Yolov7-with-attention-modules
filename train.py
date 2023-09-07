@@ -275,8 +275,12 @@ def train(hyp, opt, device, tb_writer=None):
 
     # DDP mode
     if cuda and rank != -1:
+        # condition = any(
+        #     (isinstance(layer, nn.MultiheadAttention) or isinstance(layer, CBAM))
+        #     for layer in model.modules()
+        # )
         condition = any(
-            (isinstance(layer, nn.MultiheadAttention) or isinstance(layer, CBAM))
+            isinstance(layer, nn.MultiheadAttention)
             for layer in model.modules()
         )
         model = DDP(model, device_ids=[opt.local_rank], output_device=opt.local_rank,
