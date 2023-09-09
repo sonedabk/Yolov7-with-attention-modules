@@ -70,8 +70,8 @@ head:
    [-1, 1, Conv, [128, 1, 1, None, 1, nn.Mish()]],  # 47
   
    [-1, 1, Conv, [64, 1, 1, None, 1, nn.LeakyReLU(0.1)]],
-   [-1, 1, nn.Upsample, [None, 2, 'nearest']],
-   [14, 1, Conv, [64, 1, 1, None, 1, nn.LeakyReLU(0.1)]], # route backbone P3
+   [-1, 1, nn.Upsample, [None, 4, 'nearest']],
+   [7, 1, Conv, [64, 1, 1, None, 1, nn.LeakyReLU(0.1)]], # route backbone P3
    [[-1, -2], 1, Concat, [1]],
    
    [-1, 1, Conv, [32, 1, 1, None, 1, nn.Mish()]],
@@ -81,7 +81,7 @@ head:
    [[-1, -2, -3, -4], 1, Concat, [1]],
    [-1, 1, Conv, [64, 1, 1, None, 1, nn.Mish()]],  # 57
    
-   [-1, 1, Conv, [128, 3, 2, None, 1, nn.LeakyReLU(0.1)]],
+   [-1, 1, Conv, [128, 3, 4, None, 1, nn.LeakyReLU(0.1)]],
    [[-1, 47], 1, Concat, [1]],
    
    [-1, 1, Conv, [64, 1, 1, None, 1, nn.Mish()]],
@@ -101,7 +101,7 @@ head:
    [[-1, -2, -3, -4], 1, Concat, [1]],
    [-1, 1, Conv, [256, 1, 1, None, 1, nn.Mish()]],  # 73
       
-   [57, 1, Conv, [128, 3, 1, None, 1, nn.LeakyReLU(0.1)]],
+   [57, 1, Conv, [128, 3, 1, None, 1, nn.LeakyReLU(0.1)]], # for detect small obj
    [65, 1, Conv, [256, 3, 1, None, 1, nn.LeakyReLU(0.1)]],
    [73, 1, Conv, [512, 3, 1, None, 1, nn.LeakyReLU(0.1)]],
 
