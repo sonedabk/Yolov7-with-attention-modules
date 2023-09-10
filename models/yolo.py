@@ -580,6 +580,7 @@ class Model(nn.Module):
 
     def forward(self, x, augment=False, profile=False):
         if augment:
+            print("OKKOKOK")
             img_size = x.shape[-2:]  # height, width
             s = [1, 0.83, 0.67]  # scales
             f = [None, 3, None]  # flips (2-ud, 3-lr)
