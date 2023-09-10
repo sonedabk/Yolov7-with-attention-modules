@@ -104,9 +104,9 @@ head:
    [53, 1, Conv, [128, 3, 1, None, 1, nn.LeakyReLU(0.1)]], # for detect small obj
    [-1, 1, CBAM, [128]], #71
    [61, 1, Conv, [256, 3, 1, None, 1, nn.LeakyReLU(0.1)]],
-   [-1, 1, CBAM, [128]], #73
+   [-1, 1, CBAM, [256]], #73
    [69, 1, Conv, [512, 3, 1, None, 1, nn.LeakyReLU(0.1)]],
-   [-1, 1, CBAM, [128]], # 75
+   [-1, 1, CBAM, [512]], # 75
 
    [[71,73,75], 1, IDetect, [nc, anchors]],   # Detect(P3, P4, P5)
   ]
