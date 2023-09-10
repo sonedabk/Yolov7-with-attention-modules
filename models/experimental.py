@@ -74,6 +74,7 @@ class Ensemble(nn.ModuleList):
     def forward(self, x, augment=False):
         y = []
         for module in self:
+            print(type(module))
             y.append(module(x, augment)[0])
         # y = torch.stack(y).max(0)[0]  # max ensemble
         # y = torch.stack(y).mean(0)  # mean ensemble

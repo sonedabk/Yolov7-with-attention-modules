@@ -490,21 +490,32 @@ def plot_skeleton_kpts(im, kpts, steps, orig_shape=None):
             continue
         cv2.line(im, pos1, pos2, (int(r), int(g), int(b)), thickness=2)
 
-def visualize_cbam_attention(image, attention_map, up_factor, no_attention=False):
-    # Compute the heatmap
-    if up_factor > 1:
-        attention_map = F.interpolate(attention_map.unsqueeze(0), scale_factor=up_factor, mode='bilinear', align_corners=False)
-    attention_map = attention_map.squeeze().cpu().numpy()
-    attention_map = cv2.applyColorMap(np.uint8(255 * attention_map), cv2.COLORMAP_JET)
-    attention_map = cv2.cvtColor(attention_map, cv2.COLOR_BGR2RGB)
-    attention_map = np.float32(attention_map) / 255
+def visualize_single_cbam_attention(image, attention_map):
+    image = image.clone()
+    a = attention_map.clone()
 
-    # Resize the image (adjust dimensions as needed)
-    img = cv2.resize(image.permute(1, 2, 0).cpu().numpy(), (466, 60))
+    img = image.squeeze(0).permute(1, 2, 0).cpu().numpy()
+    img_size = img.shape[1]
 
-    if no_attention:
-        return torch.from_numpy(img)
-    else:
-        # Add the heatmap to the image
-        visualization = 0.6 * img + 0.4 * attention_map
-        return torch.from_numpy(visualization)
+    up_factor = int(img_size // a.size()[2])
+    print(up_factor, "UP FACTOR")
+
+    # Resize the attention map to match the image size
+    attn = F.interpolate(a, scale_factor=up_factor,
+                                mode='bilinear', align_corners=False)
+
+    print(attn.size())
+    # Normalize the attention map
+    attn -= attn.min()
+    attn /= attn.max()
+    attn = attn.squeeze(0)[:3].permute(1, 2, 0).mul(255).byte().cpu().numpy()
+
+    # Apply color mapping to the attention map
+    attn = cv2.applyColorMap(attn, cv2.COLORMAP_JET)
+    attn = cv2.cvtColor(attn, cv2.COLOR_BGR2RGB)
+    attn = np.float32(attn) / 255
+
+    print(attn.shape)
+    # Blend the image and attention map
+    visualization = 0.6 * img + 0.4 * attn
+    return visualization

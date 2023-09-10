@@ -17,6 +17,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 
+
 try:
     import thop  # for FLOPS computation
 except ImportError:
@@ -371,4 +372,5 @@ class TracedModel(nn.Module):
     def forward(self, x, augment=False, profile=False):
         out = self.model(x)
         out = self.detect_layer(out)
+        print("OK TRACE")
         return out

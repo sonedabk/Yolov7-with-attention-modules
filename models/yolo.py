@@ -13,8 +13,7 @@ from utils.general import make_divisible, check_file, set_logging
 from utils.torch_utils import time_synchronized, fuse_conv_and_bn, model_info, scale_img, initialize_weights, \
     select_device, copy_attr
 from utils.loss import SigmoidBin
-import matplotlib.pyplot as plt
-import torchvision
+
 
 try:
     import thop  # for FLOPS computation
@@ -581,8 +580,7 @@ class Model(nn.Module):
         logger.info('')
 
     def forward(self, x, augment=False, profile=False):
-        if augment:
-            
+        if augment:          
             img_size = x.shape[-2:]  # height, width
             s = [1, 0.83, 0.67]  # scales
             f = [None, 3, None]  # flips (2-ud, 3-lr)
@@ -602,7 +600,8 @@ class Model(nn.Module):
             return self.forward_once(x, profile)  # single-scale inference, train
 
     def forward_once(self, x, profile=False):
-        y, dt = [], []  # outputs
+        y, dt = [], []  # outputs  
+        cbams = []    
         for m in self.model:
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
@@ -624,12 +623,9 @@ class Model(nn.Module):
                     m(x.copy() if c else x)
                 dt.append((time_synchronized() - t) * 100)
                 print('%10.1f%10.0f%10.1fms %-40s' % (o, m.np, dt[-1], m.type))
-            x = m(x)  # run
-            if isinstance(m, CBAM):
-                viz_img = x.squeeze(0)[:3]
-                viz_img = torchvision.transforms.ToPILImage()(viz_img)
-                viz_img.show()
-            
+            x = m(x)  # run   
+            # if isinstance(m, CBAM):
+            #     cbams.append(x)     
             y.append(x if m.i in self.save else None)  # save output
 
         if profile:
