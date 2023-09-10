@@ -495,20 +495,24 @@ def visualize_single_cbam_attention(image, attention_map):
     a = attention_map.clone()
 
     img = image.squeeze(0).permute(1, 2, 0).cpu().numpy()
-    img_size = img.shape[1]
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img_width, img_height, _ = img.shape
 
-    up_factor = int(img_size // a.size()[2])
-    print(up_factor, "UP FACTOR")
+    attn_height, attn_width = a.size()[3], a.size()[2]
+    
+    scale_factor_width = int(img_width / attn_width)
+    scale_factor_height = int(img_height / attn_height)
 
     # Resize the attention map to match the image size
-    attn = F.interpolate(a, scale_factor=up_factor,
+    attn = F.interpolate(a, scale_factor=(scale_factor_height, scale_factor_width),
                                 mode='bilinear', align_corners=False)
+    
+    attn = attn.mean(dim=1, keepdim=True)
 
-    print(attn.size())
     # Normalize the attention map
     attn -= attn.min()
     attn /= attn.max()
-    attn = attn.squeeze(0)[:3].permute(1, 2, 0).mul(255).byte().cpu().numpy()
+    attn = attn.squeeze(0).permute(1, 2, 0).mul(255).byte().cpu().numpy()
 
     # Apply color mapping to the attention map
     attn = cv2.applyColorMap(attn, cv2.COLORMAP_JET)

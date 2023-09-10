@@ -624,13 +624,13 @@ class Model(nn.Module):
                 dt.append((time_synchronized() - t) * 100)
                 print('%10.1f%10.0f%10.1fms %-40s' % (o, m.np, dt[-1], m.type))
             x = m(x)  # run   
-            # if isinstance(m, CBAM):
-            #     cbams.append(x)     
+            if isinstance(m, CBAM):
+                cbams.append(x)     
             y.append(x if m.i in self.save else None)  # save output
 
         if profile:
             print('%.1fms total' % sum(dt))
-        return x
+        return x, cbams
 
     def _initialize_biases(self, cf=None):  # initialize biases into Detect(), cf is class frequency
         # https://arxiv.org/abs/1708.02002 section 3.3

@@ -370,7 +370,7 @@ class TracedModel(nn.Module):
         print(" model is traced! \n") 
 
     def forward(self, x, augment=False, profile=False):
-        out = self.model(x)
+        out, cbams = self.model(x)
         out = self.detect_layer(out)
         print("OK TRACE")
-        return out
+        return out, cbams
