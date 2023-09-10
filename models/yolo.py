@@ -14,6 +14,7 @@ from utils.torch_utils import time_synchronized, fuse_conv_and_bn, model_info, s
     select_device, copy_attr
 from utils.loss import SigmoidBin
 import matplotlib.pyplot as plt
+import torchvision
 
 try:
     import thop  # for FLOPS computation
@@ -625,7 +626,9 @@ class Model(nn.Module):
                 print('%10.1f%10.0f%10.1fms %-40s' % (o, m.np, dt[-1], m.type))
             x = m(x)  # run
             if isinstance(m, CBAM):
-                print("CBAM out", x.size())
+                viz_img = x.squeeze(0)[:3]
+                viz_img = torchvision.transforms.ToPILImage()(viz_img)
+                viz_img.show()
             
             y.append(x if m.i in self.save else None)  # save output
 
