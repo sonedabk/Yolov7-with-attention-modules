@@ -13,6 +13,7 @@ from utils.general import make_divisible, check_file, set_logging
 from utils.torch_utils import time_synchronized, fuse_conv_and_bn, model_info, scale_img, initialize_weights, \
     select_device, copy_attr
 from utils.loss import SigmoidBin
+import matplotlib.pyplot as plt
 
 try:
     import thop  # for FLOPS computation
@@ -580,7 +581,7 @@ class Model(nn.Module):
 
     def forward(self, x, augment=False, profile=False):
         if augment:
-            print("OKKOKOK")
+            
             img_size = x.shape[-2:]  # height, width
             s = [1, 0.83, 0.67]  # scales
             f = [None, 3, None]  # flips (2-ud, 3-lr)
@@ -622,8 +623,9 @@ class Model(nn.Module):
                     m(x.copy() if c else x)
                 dt.append((time_synchronized() - t) * 100)
                 print('%10.1f%10.0f%10.1fms %-40s' % (o, m.np, dt[-1], m.type))
-
             x = m(x)  # run
+            if isinstance(m, CBAM):
+                print("CBAM out", x.size())
             
             y.append(x if m.i in self.save else None)  # save output
 
