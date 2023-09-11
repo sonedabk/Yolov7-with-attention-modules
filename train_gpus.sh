@@ -1,4 +1,4 @@
 # # nproc_per_node = số lượn cuda sử dụn
 # python -m torch.distributed.launch --nproc_per_node 4 --master_port 9528 train.py --device 0,1,2,3 --sync-bn --workers 16 --batch-size 32 --epochs 1000 --data ./visdrone_dataset.yaml --img 640 640 --cfg cfg/training/v7-tiny-cbam-v3.yaml --weights '' --hyp data/hyp.scratch.tiny.yaml
 # nproc_per_node = số lượn cuda sử dụn
-python -m torch.distributed.launch --nproc_per_node 2 --master_port 9527 train.py --device 0,1 --sync-bn --workers 8 --batch-size 16 --epochs 1000 --data ./visdrone_dataset.yaml --img 640 640 --cfg cfg/training/v7-tiny-cbam-v3.yaml --weights /home/edabk/quangnghiem/yolov7/runs/train/exp28/weights/last.pt --hyp data/hyp.scratch.tiny.yaml --name exp28
+python -m torch.distributed.launch --nproc_per_node 2 --master_port 9527 train.py --device 0,1 --sync-bn --workers 8 --batch-size 8 --epochs 1000 --data ./visdrone_dataset.yaml --img 640 640 --cfg /home/edabk/quangnghiem/yolov7/cfg/training/vt_tiny_cbam_sppcsp_c3_small.yaml --weights '' --hyp data/hyp.scratch.tiny.yaml --name 11923
