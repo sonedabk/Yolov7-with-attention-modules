@@ -1,3 +1,21 @@
 exp28: GroupFilter
 exp33: CBAM 
 exp36: CBAM HEAD + BACKBONE
+
+tinyv4-tinyv44-tinyv45:
+Model Summary: 358 layers, 7612906 parameters, 7612906 gradients, 68.9 GFLOPS
+ Class      Images      Labels           P           R      mAP@.5  mAP@.5:.95: 100%|███████████| 55/55 [01:08<00:00,  1.24s/it]
+                 all         548       38759       0.545       0.483       0.471       0.278
+          pedestrian         548        8844        0.56       0.597       0.578       0.274
+              people         548        5125        0.64       0.462       0.486       0.183
+             bicycle         548        1287       0.391       0.196       0.187      0.0859
+                 car         548       14064       0.705       0.881       0.871       0.607
+                 van         548        1975       0.517       0.535        0.51       0.363
+               truck         548         750       0.543       0.385       0.381       0.257
+            tricycle         548        1045        0.52       0.302        0.33       0.189
+     awning-tricycle         548         532       0.357       0.244       0.181       0.115
+                 bus         548         251        0.65       0.618       0.622       0.443
+               motor         548        4886       0.569        0.61       0.567       0.264
+17 epochs completed in 1.056 hours.
+
+Optimizer stripped from runs/train/tinyv45/weights/last.pt, 15.6MB
