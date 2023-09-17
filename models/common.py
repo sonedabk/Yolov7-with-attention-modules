@@ -179,6 +179,25 @@ def DWConv(c1, c2, k=1, s=1, act=True):
     # Depthwise convolution
     return Conv(c1, c2, k, s, g=math.gcd(c1, c2), act=act)
 
+def DepthWise(c1, k=1, s=1, act=True):
+    """True deptwise Conv"""
+    return Conv(c1, c1, k, s, g=c1, act=act)
+
+def PointWise(c1, c2, act=True):
+    """Pointwise Conv"""
+    return Conv(c1, c2, k=1, s=1, g=1, act=act)
+
+class DWSConv(nn.Module):
+    """Depthwise seperatable convolution"""
+    def __init__(self, c1, c2, k=1, s=1, act=True):
+        super(DWSConv, self).__init__()
+        self.dwconv = DepthWise(c1, k, s, act)
+        self.pwconv = PointWise(c1, c2, act)
+    def forward(self, x):
+        out = self.dwconv(x)
+        out = self.pwconv(out)
+
+        return out
 
 class GhostConv(nn.Module):
     # Ghost Convolution https://github.com/huawei-noah/ghostnet
