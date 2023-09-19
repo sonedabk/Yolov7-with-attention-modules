@@ -2869,3 +2869,141 @@ class ShuffleNetV2(nn.Module):
             out = torch.cat((self.branch1(x), self.branch2(x)), dim=1)
         out = channel_shuffle(out, self.shuffle_groups)
         return out
+
+
+    
+# Implement follow paper: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC10346989/pdf/sensors-23-05786.pdf
+class MIRB(nn.Module):
+    def __init__(self, c1, c2, expand, k=1, s=1, act=True):
+        super(MIRB, self).__init__()
+        self.CBRin = Conv(c1, c1, k=k, s=s, act=act)
+        self.num_channel_split = int(c1/3)
+
+        expand_each = int(expand / 3)
+
+        self.CBRout = Conv(c1 - self.num_channel_split * 2, c1, k=k, s=s, act=act)
+        self.IR1 = InvertRes(self.num_channel_split, expand_each, nn.ReLU6())
+        self.IR2 = InvertRes(self.num_channel_split, expand_each, nn.ReLU6())
+        self.IR3 = InvertRes(self.num_channel_split, expand_each, nn.ReLU6())
+    def forward(self, x):
+        out = self.CBRin(x)
+        chan1, chan2, chan3, remain = torch.split(out, int(x.size(1)/3), 1)
+
+        out_chan1 = self.IR1(chan1)
+        out_chan2 = self.IR2(chan2)
+        out_chan3 = self.IR3(chan3)
+
+        shortcut = out_chan1 + out_chan2 + out_chan3
+
+        ir_concat = torch.cat((remain, shortcut), 1)
+
+        out = out + self.CBRout(ir_concat)
+
+        return out
+
+class PISPPF(nn.Module):
+    def __init__(self, c1, c2, k=[5, 9, 13]):
+        super(PISPPF, self).__init__()
+        c_ = c1//2
+        self.sbl1 = SBLConv(c1, c_, k=3)
+        self.route1 = nn.Sequential(
+            nn.MaxPool2d(kernel_size=k[0], stride=1, padding=k[0]//2),
+            Involution(c_, c_, 3, 1),
+            SBLConv(c_, c_)
+        )
+        self.route2 = nn.Sequential(
+            nn.MaxPool2d(kernel_size=k[1], stride=1, padding=k[1]//2),
+            Involution(c_, c_, 3, 1),
+            SBLConv(c_, c_)
+        )
+        self.route3 = nn.Sequential(
+            nn.MaxPool2d(kernel_size=k[2], stride=1, padding=k[2]//2),
+            Involution(c_, c_, 3, 1),
+            SBLConv(c_, c_)
+        )
+        self.sbl2 = SBLConv(c_ * 4, c2)
+    def forward(self, x):
+        out = self.sbl1(x)
+ 
+        route1 = self.route1(out)
+        route2 = self.route2(out)
+        route3 = self.route3(out)
+
+        cat = torch.cat((route1, route2, route3, out), 1)
+        out = self.sbl2(cat)
+
+        return out
+        
+
+class InvertRes(nn.Module):
+    def __init__(self, c1, expand, act=True):
+        super(InvertRes, self).__init__()
+        self.CBR1 = Conv(c1, c1, k=1, s=1, act=act)
+        self.DWCBR = DWSConv(c1, expand, act=act)
+        self.CBR2 = Conv(expand, c1, k=1, s=1, act=act)
+    def forward(self, x):
+        out = self.CBR1(x)
+        out = self.DWCBR(out)
+        out = self.CBR2(out)
+        out = x + out
+        return out
+
+class C3_CBAM(nn.Module):
+    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):
+        super(C3_CBAM, self).__init__()
+        self.c3 = C3(c1, c2, n, False, shortcut, g, e)
+        self.cbam = CBAM(c2, c2)
+    def forward(self, x):
+        out = self.c3(x)
+        out = self.cbam(out)
+
+        return out
+
+class SBLConv(Conv):
+    def __init__(self, c1, c2, k=1, s=1, p=None, g=1):
+        super().__init__(c1, c2, k=k, s=s, p=p, g=g,act=nn.LeakyReLU(0.1))
+
+# class Involution(nn.Module):
+
+#     def __init__(self,c1,c2,kernel_size,stride):
+#         super(Involution, self).__init__()
+#         self.kernel_size = kernel_size
+#         self.stride = stride
+#         self.c1 = c1
+#         reduction_ratio = 4
+#         self.group_channels = 16
+#         self.groups = self.c1 // self.group_channels
+#         self.conv1 = Conv(
+#             c1, c1 // reduction_ratio,1)
+#         self.conv2 = Conv(
+#             c1 // reduction_ratio,
+#             kernel_size**2 * self.groups,
+#         1,1)
+           
+#         if stride > 1:
+#             self.avgpool = nn.AvgPool2d(stride, stride)
+#         self.unfold = nn.Unfold(kernel_size, 1, (kernel_size-1)//2, stride)    
+
+#     def forward(self, x):
+#         print("INVO IN", x.shape)
+#         weight = self.conv2(self.conv1(x if self.stride == 1 else self.avgpool(x)))
+#         b, c, h, w = weight.shape
+#         weight = weight.view(b, self.groups, self.kernel_size**2, h, w).unsqueeze(2)
+#         #out = _involution_cuda(x, weight, stride=self.stride, padding=(self.kernel_size-1)//2)
+#         #print("weight shape:",weight.shape)
+#         out = self.unfold(x).view(b, self.groups, self.group_channels, self.kernel_size**2, h, w)
+#         #print("new out:",(weight*out).shape)
+#         out = (weight * out).sum(dim=3).view(b, self.c1, h, w)     
+#         return out
+
+class DWSConv(nn.Module):
+    def __init__(self, c1, c2, k=3, s=1,act=True):
+        super(DWSConv, self).__init__()
+        self.depthwise = Conv(c1, c1, k=k, s=s, g=c1,act=act)
+        self.pointwise = Conv(c1, c2, k=1, s=1, g=1, act=act)
+
+    def forward(self, x):
+        out = self.depthwise(x)
+        out = self.pointwise(out)
+
+        return out
