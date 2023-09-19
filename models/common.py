@@ -2893,7 +2893,7 @@ class ShuffleNetV2(nn.Module):
     
 # Implement follow paper: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC10346989/pdf/sensors-23-05786.pdf
 class MIRB(nn.Module):
-    def __init__(self, c1, expand, k=1, s=1, act=True):
+    def __init__(self, c1, c2, expand, k=1, s=1, act=True):
         super(MIRB, self).__init__()
         self.CBRin = Conv(c1, c1, k=k, s=s, act=act)
         self.num_channel_split = int(c1/3)
@@ -2970,7 +2970,7 @@ class InvertRes(nn.Module):
 class C3_CBAM(nn.Module):
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):
         super(C3_CBAM, self).__init__()
-        self.c3 = C3(c1, c2, n, shortcut, g, e)
+        self.c3 = C3(c1, c2, n, False, shortcut, g, e)
         self.cbam = CBAM(c2, c2)
     def forward(self, x):
         out = self.c3(x)
@@ -2979,47 +2979,47 @@ class C3_CBAM(nn.Module):
         return out
 
 class SBLConv(Conv):
-    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1):
-        super().__init__(c1, c2, k=k, s=s, p=p, g=g, d=d, act=nn.LeakyReLU(0.1))
+    def __init__(self, c1, c2, k=1, s=1, p=None, g=1):
+        super().__init__(c1, c2, k=k, s=s, p=p, g=g,act=nn.LeakyReLU(0.1))
 
-class Involution(nn.Module):
+# class Involution(nn.Module):
 
-    def __init__(self,c1,c2,kernel_size,stride):
-        super(Involution, self).__init__()
-        self.kernel_size = kernel_size
-        self.stride = stride
-        self.c1 = c1
-        reduction_ratio = 4
-        self.group_channels = 16
-        self.groups = self.c1 // self.group_channels
-        self.conv1 = Conv(
-            c1, c1 // reduction_ratio,1)
-        self.conv2 = Conv(
-            c1 // reduction_ratio,
-            kernel_size**2 * self.groups,
-        1,1)
+#     def __init__(self,c1,c2,kernel_size,stride):
+#         super(Involution, self).__init__()
+#         self.kernel_size = kernel_size
+#         self.stride = stride
+#         self.c1 = c1
+#         reduction_ratio = 4
+#         self.group_channels = 16
+#         self.groups = self.c1 // self.group_channels
+#         self.conv1 = Conv(
+#             c1, c1 // reduction_ratio,1)
+#         self.conv2 = Conv(
+#             c1 // reduction_ratio,
+#             kernel_size**2 * self.groups,
+#         1,1)
            
-        if stride > 1:
-            self.avgpool = nn.AvgPool2d(stride, stride)
-        self.unfold = nn.Unfold(kernel_size, 1, (kernel_size-1)//2, stride)    
+#         if stride > 1:
+#             self.avgpool = nn.AvgPool2d(stride, stride)
+#         self.unfold = nn.Unfold(kernel_size, 1, (kernel_size-1)//2, stride)    
 
-    def forward(self, x):
-        print("INVO IN", x.shape)
-        weight = self.conv2(self.conv1(x if self.stride == 1 else self.avgpool(x)))
-        b, c, h, w = weight.shape
-        weight = weight.view(b, self.groups, self.kernel_size**2, h, w).unsqueeze(2)
-        #out = _involution_cuda(x, weight, stride=self.stride, padding=(self.kernel_size-1)//2)
-        #print("weight shape:",weight.shape)
-        out = self.unfold(x).view(b, self.groups, self.group_channels, self.kernel_size**2, h, w)
-        #print("new out:",(weight*out).shape)
-        out = (weight * out).sum(dim=3).view(b, self.c1, h, w)     
-        return out
+#     def forward(self, x):
+#         print("INVO IN", x.shape)
+#         weight = self.conv2(self.conv1(x if self.stride == 1 else self.avgpool(x)))
+#         b, c, h, w = weight.shape
+#         weight = weight.view(b, self.groups, self.kernel_size**2, h, w).unsqueeze(2)
+#         #out = _involution_cuda(x, weight, stride=self.stride, padding=(self.kernel_size-1)//2)
+#         #print("weight shape:",weight.shape)
+#         out = self.unfold(x).view(b, self.groups, self.group_channels, self.kernel_size**2, h, w)
+#         #print("new out:",(weight*out).shape)
+#         out = (weight * out).sum(dim=3).view(b, self.c1, h, w)     
+#         return out
 
 class DWSConv(nn.Module):
-    def __init__(self, c1, c2, k=3, s=1, d=1, act=True):
-        super(DWConv, self).__init__()
-        self.depthwise = Conv(c1, c1, k=k, s=s, g=c1, d=d, act=act)
-        self.pointwise = Conv(c1, c2, k=1, s=1, g=1, d=d, act=act)
+    def __init__(self, c1, c2, k=3, s=1,act=True):
+        super(DWSConv, self).__init__()
+        self.depthwise = Conv(c1, c1, k=k, s=s, g=c1,act=act)
+        self.pointwise = Conv(c1, c2, k=1, s=1, g=1, act=act)
 
     def forward(self, x):
         out = self.depthwise(x)
