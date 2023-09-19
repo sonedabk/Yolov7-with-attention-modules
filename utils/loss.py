@@ -610,7 +610,7 @@ class ComputeLossOTA:
                 selected_tbox = targets[i][:, 2:6] * pre_gen_gains[i]
                 selected_tbox[:, :2] -= grid
                 # iou = bbox_iou(pbox.T, selected_tbox, x1y1x2y2=False, CIoU=True)  # iou(prediction, target)
-                iou = bbox_iou(pbox.T, selected_tbox, x1y1x2y2=False, EIoU=True, Focal=True) 
+                iou = bbox_iou(pbox.T, selected_tbox, x1y1x2y2=False, EIoU=True, Focal=True, gamma=0.9) 
 
                 # lbox += (1.0 - iou).mean()  # iou loss
                 if type(iou) is tuple:
