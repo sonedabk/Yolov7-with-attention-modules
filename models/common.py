@@ -2893,20 +2893,17 @@ class ShuffleNetV2(nn.Module):
     
 # Implement follow paper: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC10346989/pdf/sensors-23-05786.pdf
 class MIRB(nn.Module):
-    def __init__(self, c1, c2, expand, k=1, s=1, act=True):
+    def __init__(self, c1, c2, k=1, s=1, act=True):
         super(MIRB, self).__init__()
-        self.CBRin = Conv(c1, c1, k=k, s=s, act=act)
-        self.num_channel_split = int(c1/3)
-
-        expand_each = int(expand / 3)
-
-        self.CBRout = Conv(c1 - self.num_channel_split * 2, c1, k=k, s=s, act=act)
-        self.IR1 = InvertRes(self.num_channel_split, expand_each, nn.ReLU6())
-        self.IR2 = InvertRes(self.num_channel_split, expand_each, nn.ReLU6())
-        self.IR3 = InvertRes(self.num_channel_split, expand_each, nn.ReLU6())
+        self.CBRin = Conv(c1, c2, k=k, s=s, act=act)
+        c_ = c2//4
+        self.CBRout = Conv(c2//2, c2, k=1, s=1, act=act)
+        self.IR1 = InvertRes(c_, 2 * c_, nn.ReLU6())
+        self.IR2 = InvertRes(c_, 2 * c_, nn.ReLU6())
+        self.IR3 = InvertRes(c_, 2 * c_, nn.ReLU6())
     def forward(self, x):
         out = self.CBRin(x)
-        chan1, chan2, chan3, remain = torch.split(out, int(x.size(1)/3), 1)
+        chan1, chan2, chan3, remain = torch.split(out, int(out.size(1)//4), 1)
 
         out_chan1 = self.IR1(chan1)
         out_chan2 = self.IR2(chan2)
@@ -3026,3 +3023,16 @@ class DWSConv(nn.Module):
         out = self.pointwise(out)
 
         return out
+
+# New architecture base yolov7-tiny + efficientNet
+# class MCBRes_CBAM(nn.Module):
+#     def __init__(self, c1, c2, g=1, act=True):
+#         super(MCBRes_CBAM, self).__init__()
+#         c_ = c1//2
+#         self.branch1 = Conv(c1, c2, k=1, s=1, g=g, act=act)
+#         self.
+
+#     def forward(self, x):
+#         pass
+
+# End new architecture
