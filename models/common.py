@@ -2978,50 +2978,41 @@ class SBLConv(Conv):
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1):
         super().__init__(c1, c2, k=k, s=s, p=p, g=g,act=nn.LeakyReLU(0.1))
 
-# class Involution(nn.Module):
 
-#     def __init__(self,c1,c2,kernel_size,stride):
-#         super(Involution, self).__init__()
-#         self.kernel_size = kernel_size
-#         self.stride = stride
-#         self.c1 = c1
-#         reduction_ratio = 4
-#         self.group_channels = 16
-#         self.groups = self.c1 // self.group_channels
-#         self.conv1 = Conv(
-#             c1, c1 // reduction_ratio,1)
-#         self.conv2 = Conv(
-#             c1 // reduction_ratio,
-#             kernel_size**2 * self.groups,
-#         1,1)
-           
-#         if stride > 1:
-#             self.avgpool = nn.AvgPool2d(stride, stride)
-#         self.unfold = nn.Unfold(kernel_size, 1, (kernel_size-1)//2, stride)    
+class DWSBConv(nn.Module):
+    """Depth-wise with batchnorm"""
+    def __init__(self, c1, c2, k=3, s=1,act=True):
+        super(DWSBConv, self).__init__()
+        self.depthwise = nn.Conv2d(c1, c1, kernel_size=k, stride=s, padding=k//2, groups=c1, bias=False)
+        self.pointwise = nn.Conv2d(c1, c2, kernel_size=1, stride=1, bias=False)
+        self.bn = nn.BatchNorm2d(c2)
+        self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
 
-#     def forward(self, x):
-#         print("INVO IN", x.shape)
-#         weight = self.conv2(self.conv1(x if self.stride == 1 else self.avgpool(x)))
-#         b, c, h, w = weight.shape
-#         weight = weight.view(b, self.groups, self.kernel_size**2, h, w).unsqueeze(2)
-#         #out = _involution_cuda(x, weight, stride=self.stride, padding=(self.kernel_size-1)//2)
-#         #print("weight shape:",weight.shape)
-#         out = self.unfold(x).view(b, self.groups, self.group_channels, self.kernel_size**2, h, w)
-#         #print("new out:",(weight*out).shape)
-#         out = (weight * out).sum(dim=3).view(b, self.c1, h, w)     
-#         return out
+    def forward(self, x):
+        out = self.act(self.depthwise(x))
+        out = self.act(self.pointwise(out))
+        out = self.bn(out)
+        return out
+    
+    def fuseforward(self, x):
+        out = self.act(self.depthwise(x))
+        out = self.act(self.pointwise(out))
+        return out
+    
 
 class DWSConv(nn.Module):
     def __init__(self, c1, c2, k=3, s=1,act=True):
         super(DWSConv, self).__init__()
-        self.depthwise = Conv(c1, c1, k=k, s=s, g=c1,act=act)
-        self.pointwise = Conv(c1, c2, k=1, s=1, g=1, act=act)
+        self.depthwise = nn.Conv2d(c1, c1, kernel_size=k, stride=s, padding=k//2, groups=c1, bias=False)
+        self.pointwise = nn.Conv2d(c1, c2, kernel_size=1, stride=1, bias=False)
+        self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
 
     def forward(self, x):
-        out = self.depthwise(x)
-        out = self.pointwise(out)
+        out = self.act(self.depthwise(x))
+        out = self.act(self.pointwise(out))
 
         return out
+    
 
 # New architecture base yolov7-tiny + efficientNet
 # class MCBRes_CBAM(nn.Module):
