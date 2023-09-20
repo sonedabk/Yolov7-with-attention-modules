@@ -2895,7 +2895,7 @@ class ShuffleNetV2(nn.Module):
 class MIRB(nn.Module):
     def __init__(self, c1, c2, k=1, s=1, act=True):
         super(MIRB, self).__init__()
-        self.CBRin = Conv(c1, c2, k=k, s=s, act=act)
+        self.CBRin = Conv(c1, c2, k=k, s=s, g=1, act=act)
         c_ = c2//4
         self.CBRout = Conv(c2//2, c2, k=1, s=1, act=act)
         self.IR1 = InvertRes(c_, 2 * c_, nn.ReLU6())
@@ -2903,7 +2903,7 @@ class MIRB(nn.Module):
         self.IR3 = InvertRes(c_, 2 * c_, nn.ReLU6())
     def forward(self, x):
         out = self.CBRin(x)
-        chan1, chan2, chan3, remain = torch.split(out, int(out.size(1)//4), 1)
+        chan1, chan2, chan3, remain = torch.split(out.clone(), int(out.size(1)//4), 1)
 
         out_chan1 = self.IR1(chan1)
         out_chan2 = self.IR2(chan2)
@@ -2914,7 +2914,6 @@ class MIRB(nn.Module):
         ir_concat = torch.cat((remain, shortcut), 1)
 
         out = out + self.CBRout(ir_concat)
-
         return out
 
 class PISPPF(nn.Module):
