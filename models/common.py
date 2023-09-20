@@ -3029,9 +3029,9 @@ class DWSConv(nn.Module):
 #         super(MCBRes_CBAM, self).__init__()
 #         c_ = c1//2
 #         self.branch1 = Conv(c1, c2, k=1, s=1, g=g, act=act)
-#         self.
 
 #     def forward(self, x):
 #         pass
+# class 
 
 # End new architecture
