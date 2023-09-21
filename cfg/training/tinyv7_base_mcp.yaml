@@ -50,7 +50,7 @@ backbone:
 
 # yolov7-tiny head
 head:
-  [[-1, 1, PISPPF, [256]],  # 27
+  [[-1, 1, SPPCSPC, [256]],  # 27
   
    [-1, 1, Conv, [128, 1, 1, None, 1]],
    [-1, 1, nn.Upsample, [None, 2, 'nearest']],
