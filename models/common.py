@@ -19,6 +19,12 @@ from utils.torch_utils import time_synchronized
 
 
 ##### basic ####
+def channel_shuffle(x, groups=2):   ##shuffle channel 
+        #RESHAPE----->transpose------->Flatten 
+        B, C, H, W = x.size()
+        out = x.view(B, groups, C // groups, H, W).permute(0, 2, 1, 3, 4).contiguous()
+        out=out.view(B, C, H, W) 
+        return out
 
 def autopad(k, p=None):  # kernel, padding
     # Pad to 'same'
@@ -255,7 +261,268 @@ class Ghost(nn.Module):
         return self.conv(x) + self.shortcut(x)
 
 ##### end of basic #####
+class ChannelAttentionModule(nn.Module):
+    def __init__(self, c1, reduction=16):
+        super(ChannelAttentionModule, self).__init__()
+        mid_channel = c1 // reduction
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.max_pool = nn.AdaptiveMaxPool2d(1)
 
+        self.shared_MLP = nn.Sequential(
+            nn.Linear(in_features=c1, out_features=mid_channel),
+            nn.LeakyReLU(0.1, inplace=True),
+            nn.Linear(in_features=mid_channel, out_features=c1)
+        )
+        self.act = nn.Sigmoid()
+        #self.act=nn.SiLU()
+    def forward(self, x):
+        avgout = self.shared_MLP(self.avg_pool(x).view(x.size(0),-1)).unsqueeze(2).unsqueeze(3)
+        maxout = self.shared_MLP(self.max_pool(x).view(x.size(0),-1)).unsqueeze(2).unsqueeze(3)
+        return self.act(avgout + maxout)
+        
+class SpatialAttentionModule(nn.Module):
+    def __init__(self):
+        super(SpatialAttentionModule, self).__init__()
+        self.conv2d = nn.Conv2d(in_channels=2, out_channels=1, kernel_size=7, stride=1, padding=3)
+        self.act = nn.Sigmoid()
+    def forward(self, x):
+        avgout = torch.mean(x, dim=1, keepdim=True)
+        maxout, _ = torch.max(x, dim=1, keepdim=True)
+        out = torch.cat([avgout, maxout], dim=1)
+        out = self.act(self.conv2d(out))
+        return out
+
+class CBAM(nn.Module):
+    def __init__(self, c1,c2):
+        super(CBAM, self).__init__()
+        self.channel_attention = ChannelAttentionModule(c1)
+        self.spatial_attention = SpatialAttentionModule()
+
+    def forward(self, x):
+        out = self.channel_attention(x) * x
+        out = self.spatial_attention(out) * out
+        return out
+
+class ResBlock_CBAM(nn.Module):
+    def __init__(self,in_places, places, stride=1,downsampling=False, expansion = 4):
+        super(ResBlock_CBAM,self).__init__()
+        self.expansion = expansion
+        self.downsampling = downsampling
+
+        self.bottleneck = nn.Sequential(
+            nn.Conv2d(in_channels=in_places,out_channels=places,kernel_size=1,stride=1, bias=False),
+            nn.BatchNorm2d(places),
+            nn.LeakyReLU(0.1, inplace=True),
+            nn.Conv2d(in_channels=places, out_channels=places, kernel_size=3, stride=stride, padding=1, bias=False),
+            nn.BatchNorm2d(places),
+            nn.LeakyReLU(0.1, inplace=True),
+            nn.Conv2d(in_channels=places, out_channels=places*self.expansion, kernel_size=1, stride=1, bias=False),
+            nn.BatchNorm2d(places*self.expansion),
+        )
+        self.cbam = CBAM(c1=places*self.expansion,c2=places*self.expansion,)
+
+        if self.downsampling:
+            self.downsample = nn.Sequential(
+                nn.Conv2d(in_channels=in_places, out_channels=places*self.expansion, kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm2d(places*self.expansion)
+            )
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        residual = x
+        out = self.bottleneck(x)
+        out = self.cbam(out)
+        if self.downsampling:
+            residual = self.downsample(x)
+
+        out += residual
+        out = self.relu(out)
+        return out
+        
+class h_sigmoid(nn.Module):
+    def __init__(self, inplace=True):
+        super(h_sigmoid, self).__init__()
+        self.relu = nn.ReLU6(inplace=inplace)
+
+    def forward(self, x):
+        return self.relu(x + 3) / 6
+
+class h_swish(nn.Module):
+    def __init__(self, inplace=True):
+        super(h_swish, self).__init__()
+        self.sigmoid = h_sigmoid(inplace=inplace)
+
+    def forward(self, x):
+        return x * self.sigmoid(x)
+        
+class CoordAtt(nn.Module):
+    def __init__(self, inp, oup, reduction=32):
+        super(CoordAtt, self).__init__()
+
+        mip = max(8, inp // reduction)
+
+        self.conv1 = nn.Conv2d(inp, mip, kernel_size=1, stride=1, padding=0)
+        self.bn1 = nn.BatchNorm2d(mip)
+        self.act = h_swish()
+        
+        self.conv_h = nn.Conv2d(mip, oup, kernel_size=1, stride=1, padding=0)
+        self.conv_w = nn.Conv2d(mip, oup, kernel_size=1, stride=1, padding=0)
+        
+
+    def forward(self, x):
+        identity = x
+        
+        n,c,h,w = x.size()
+        pool_h = nn.AdaptiveAvgPool2d((h, 1))
+        pool_w = nn.AdaptiveAvgPool2d((1, w))
+        x_h = pool_h(x)
+        x_w = pool_w(x).permute(0, 1, 3, 2)
+
+        y = torch.cat([x_h, x_w], dim=2)
+        y = self.conv1(y)
+        y = self.bn1(y)
+        y = self.act(y) 
+        
+        x_h, x_w = torch.split(y, [h, w], dim=2)
+        x_w = x_w.permute(0, 1, 3, 2)
+
+        a_h = self.conv_h(x_h).sigmoid()
+        a_w = self.conv_w(x_w).sigmoid()
+
+        out = identity * a_w * a_h
+
+        return out   
+        
+class MHSA(nn.Module):
+    def __init__(self, n_dims, width=14, height=14, heads=4,pos_emb=False):
+        super(MHSA, self).__init__()
+
+        self.heads = heads
+        self.query = nn.Conv2d(n_dims, n_dims, kernel_size=1)
+        self.key = nn.Conv2d(n_dims, n_dims, kernel_size=1)
+        self.value = nn.Conv2d(n_dims, n_dims, kernel_size=1)
+        self.pos=pos_emb
+        if self.pos :
+            self.rel_h_weight = nn.Parameter(torch.randn([1, heads, (n_dims ) // heads, 1, int(height)]), requires_grad=True)
+            self.rel_w_weight = nn.Parameter(torch.randn([1, heads, (n_dims )// heads, int(width), 1]), requires_grad=True)
+        self.softmax = nn.Softmax(dim=-1)
+     
+    def forward(self, x):
+        n_batch, C, width, height = x.size() 
+        q = self.query(x).view(n_batch, self.heads, C // self.heads, -1)
+        k = self.key(x).view(n_batch, self.heads, C // self.heads, -1)
+        v = self.value(x).view(n_batch, self.heads, C // self.heads, -1)
+        #print('q shape:{},k shape:{},v shape:{}'.format(q.shape,k.shape,v.shape))  #1,4,64,256
+        content_content = torch.matmul(q.permute(0,1,3,2), k) #1,C,h*w,h*w
+        # print("qkT=",content_content.shape)
+        c1,c2,c3,c4=content_content.size()
+        if self.pos:
+       # print("old content_content shape",content_content.shape) #1,4,256,256
+            content_position = (self.rel_h_weight + self.rel_w_weight).view(1, self.heads, C // self.heads, -1).permute(0,1,3,2)   #1,4,1024,64
+           
+            content_position = torch.matmul(content_position, q)# ([1, 4, 1024, 256])
+            content_position=content_position if(content_content.shape==content_position.shape)else content_position[:,: , :c3,]
+            assert(content_content.shape==content_position.shape)
+        #print('new pos222-> shape:',content_position.shape)
+       # print('new content222-> shape:',content_content.shape)
+            energy = content_content + content_position
+        else:
+            energy=content_content
+        attention = self.softmax(energy)
+        out = torch.matmul(v, attention.permute(0,1,3,2)) #1,4,256,64
+        out = out.view(n_batch, C, width, height)
+        return out
+
+class BottleneckTransformer(nn.Module):
+    # Transformer bottleneck
+    #expansion = 1
+
+    def __init__(self, c1, c2, stride=1, heads=4, mhsa=True, resolution=None,expansion=1):
+        super(BottleneckTransformer, self).__init__()
+        c_=int(c2*expansion)
+        self.cv1 = Conv(c1, c_, 1,1)
+        #self.bn1 = nn.BatchNorm2d(c2)
+        if not mhsa:
+            self.cv2 = Conv(c_,c2, 3, 1)
+        else:
+            self.cv2 = nn.ModuleList()
+            self.cv2.append(MHSA(c2, width=int(resolution[0]), height=int(resolution[1]), heads=heads))
+            if stride == 2:
+                self.cv2.append(nn.AvgPool2d(2, 2))
+            self.cv2 = nn.Sequential(*self.cv2)
+        #self.bn2 = nn.BatchNorm2d(planes)
+        #self.cv3 = nn.Conv2d(planes, expansion * planes, kernel_size=1, bias=False)
+        #self.bn3 = nn.BatchNorm2d(expansion * planes)
+        #self.shortcut = nn.Sequential() 
+        self.shortcut = c1==c2 
+        if stride != 1 or c1 != expansion*c2:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(c1, expansion*c2, kernel_size=1, stride=stride),
+                nn.BatchNorm2d(expansion*c2)
+            )
+        self.fc1 = nn.Linear(c2, c2)     
+
+    def forward(self, x):
+        #print("transforme  input bottleck shape:",x.shape)
+        # out = F.relu(self.bn1(self.conv1(x)))
+        # out = F.relu(self.bn2(self.conv2(out)))
+        # out = self.bn3(self.conv3(out))
+        # out += self.shortcut(x)
+        # out = F.relu(out)
+        out=x + self.cv2(self.cv1(x)) if self.shortcut else self.cv2(self.cv1(x))
+        return out
+        
+class CTR3(nn.Module):
+    # CSP Bottleneck with 3 convolutions
+    def __init__(self, c1, c2, n=1,e=0.5,e2=1,w=20,h=20):  # ch_in, ch_out, number, , expansion,w,h
+        super(CTR3, self).__init__()
+        c_ = int(c2*e)  # hidden channels
+        self.cv1 = Conv(c1, c_, 1, 1)
+        self.cv2 = Conv(c1, c_, 1, 1)
+        self.cv3 = Conv(2 * c_, c2, 1)  # act=FReLU(c2)
+        self.m = nn.Sequential(*[BottleneckTransformer(c_ ,c_, stride=1, heads=4,mhsa=True,resolution=(w,h),expansion=e2) for _ in range(n)])
+        # self.m = nn.Sequential(*[CrossConv(c_, c_, 3, 1, g, 1.0, shortcut) for _ in range(n)])
+
+    def forward(self, x):
+        print("CTR3-INPUT:",x.shape)
+       # return self.cv3
+        return self.cv3(torch.cat((self.m(self.cv1(x)), self.cv2(x)), dim=1))  
+        
+class GAM_Attention(nn.Module):
+   #https://paperswithcode.com/paper/global-attention-mechanism-retain-information
+    def __init__(self, c1, c2, group=True,rate=4):
+        super(GAM_Attention, self).__init__()
+        
+        self.channel_attention = nn.Sequential(
+            nn.Linear(c1, int(c1 / rate)),
+            nn.ReLU(inplace=True),
+            nn.Linear(int(c1 / rate), c1)
+        )
+        
+        
+        self.spatial_attention = nn.Sequential(
+            
+            nn.Conv2d(c1, c1//rate, kernel_size=7, padding=3,groups=rate)if group else nn.Conv2d(c1, int(c1 / rate), kernel_size=7, padding=3), 
+            nn.BatchNorm2d(int(c1 /rate)),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(c1//rate, c2, kernel_size=7, padding=3,groups=rate) if group else nn.Conv2d(int(c1 / rate), c2, kernel_size=7, padding=3), 
+            nn.BatchNorm2d(c2)
+        )
+
+    def forward(self, x):
+        
+        b, c, h, w = x.shape
+        x_permute = x.permute(0, 2, 3, 1).view(b, -1, c)
+        x_att_permute = self.channel_attention(x_permute).view(b, h, w, c)
+        x_channel_att = x_att_permute.permute(0, 3, 1, 2)
+       # x_channel_att=channel_shuffle(x_channel_att,4) #last shuffle 
+        x = x * x_channel_att
+ 
+        x_spatial_att = self.spatial_attention(x).sigmoid()
+        x_spatial_att=channel_shuffle(x_spatial_att,4) #last shuffle 
+        out = x * x_spatial_att
+        #out=channel_shuffle(out,4) #last shuffle 
+        return out    
 
 ##### cspnet #####
 
@@ -264,14 +531,14 @@ class SPPCSPC(nn.Module):
     def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5, k=(5, 9, 13)):
         super(SPPCSPC, self).__init__()
         c_ = int(2 * c2 * e)  # hidden channels
-        self.cv1 = Conv(c1, c_, 1, 1)
-        self.cv2 = Conv(c1, c_, 1, 1)
-        self.cv3 = Conv(c_, c_, 3, 1)
-        self.cv4 = Conv(c_, c_, 1, 1)
+        self.cv1 = Conv(c1, c_, 1, 1, None, g)
+        self.cv2 = Conv(c1, c_, 1, 1, None, g)
+        self.cv3 = Conv(c_, c_, 3, 1, None, 2)
+        self.cv4 = Conv(c_, c_, 1, 1, None, g)
         self.m = nn.ModuleList([nn.MaxPool2d(kernel_size=x, stride=1, padding=x // 2) for x in k])
-        self.cv5 = Conv(4 * c_, c_, 1, 1)
-        self.cv6 = Conv(c_, c_, 3, 1)
-        self.cv7 = Conv(2 * c_, c2, 1, 1)
+        self.cv5 = Conv(4 * c_, c_, 1, 1, None, g)
+        self.cv6 = Conv(c_, c_, 3, 1, None, 2)
+        self.cv7 = Conv(2 * c_, c2, 1, 1, None, g)
 
     def forward(self, x):
         x1 = self.cv4(self.cv3(self.cv1(x)))
@@ -281,16 +548,16 @@ class SPPCSPC(nn.Module):
 
 class GhostSPPCSPC(SPPCSPC):
     # CSP https://github.com/WongKinYiu/CrossStagePartialNetworks
-    def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5, k=(5, 9, 13)):
+    def __init__(self, c1, c2, n=1, shortcut=False, g=4, e=0.5, k=(5, 9, 13)):
         super().__init__(c1, c2, n, shortcut, g, e, k)
         c_ = int(2 * c2 * e)  # hidden channels
-        self.cv1 = GhostConv(c1, c_, 1, 1)
-        self.cv2 = GhostConv(c1, c_, 1, 1)
-        self.cv3 = GhostConv(c_, c_, 3, 1)
-        self.cv4 = GhostConv(c_, c_, 1, 1)
-        self.cv5 = GhostConv(4 * c_, c_, 1, 1)
-        self.cv6 = GhostConv(c_, c_, 3, 1)
-        self.cv7 = GhostConv(2 * c_, c2, 1, 1)
+        self.cv1 = GhostConv(c1, c_, 1, 1, g)
+        self.cv2 = GhostConv(c1, c_, 1, 1, g)
+        self.cv3 = GhostConv(c_, c_, 3, 1, g)
+        self.cv4 = GhostConv(c_, c_, 1, 1, g)
+        self.cv5 = GhostConv(4 * c_, c_, 1, 1, g)
+        self.cv6 = GhostConv(c_, c_, 3, 1, g)
+        self.cv7 = GhostConv(2 * c_, c2, 1, 1, g)
 
 
 class GhostStem(Stem):
@@ -353,7 +620,120 @@ class BottleneckCSPC(nn.Module):
         y2 = self.cv2(x)
         return self.cv4(torch.cat((y1, y2), dim=1))
 
+class GhostBottleneck(nn.Module):
+    # Ghost Bottleneck https://github.com/huawei-noah/ghostnet
+    def __init__(self, c1, c2, k=3, s=1):  # ch_in, ch_out, kernel, stride
+        super().__init__()
+        c_ = c2 // 2
+        self.conv = nn.Sequential(GhostConv(c1, c_, 1, 1),  # pw
+                                  DWConv(c_, c_, k, s, act=False) if s == 2 else nn.Identity(),  # dw
+                                  GhostConv(c_, c2, 1, 1, act=False))  # pw-linear
+        self.shortcut = nn.Sequential(DWConv(c1, c1, k, s, act=False),
+                                      Conv(c1, c2, 1, 1, act=False)) if s == 2 else nn.Identity()
 
+    def forward(self, x):
+        return self.conv(x) + self.shortcut(x)
+
+class Involution(nn.Module):
+
+    def __init__(self,c1,c2,kernel_size,stride):
+        super(Involution, self).__init__()
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.c1 = c1
+        reduction_ratio = 4
+        self.group_channels = 16
+        self.groups = self.c1 // self.group_channels
+        self.conv1 = Conv(
+            c1, c1 // reduction_ratio,1)
+        self.conv2 = Conv(
+            c1 // reduction_ratio,
+            kernel_size**2 * self.groups,
+        1,1)
+           
+        if stride > 1:
+            self.avgpool = nn.AvgPool2d(stride, stride)
+        self.unfold = nn.Unfold(kernel_size, 1, (kernel_size-1)//2, stride)    
+
+    def forward(self, x):
+
+        weight = self.conv2(self.conv1(x if self.stride == 1 else self.avgpool(x)))
+        b, c, h, w = weight.shape
+        weight = weight.view(b, self.groups, self.kernel_size**2, h, w).unsqueeze(2)
+       #out = _involution_cuda(x, weight, stride=self.stride, padding=(self.kernel_size-1)//2)
+        #print("weight shape:",weight.shape)
+        out = self.unfold(x).view(b, self.groups, self.group_channels, self.kernel_size**2, h, w)
+        #print("new out:",(weight*out).shape)
+        out = (weight * out).sum(dim=3).view(b, self.c1, h, w)
+     
+        return out
+class InvolutionBottleneck(nn.Module):
+    # Standard bottleneck
+    def __init__(self, c1, c2, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, shortcut, groups, expansion
+        super(InvolutionBottleneck, self).__init__()
+        c_ = int(c2 * e)  # hidden channels
+        self.cv1 = Conv(c1, c_, 1, 1)
+        self.cv2= Involution(c_, c_, 3, 1)
+        self.cv3 = Conv(c_, c2, 3, 1, g=g)
+        self.add = shortcut and c1 == c2
+
+    def forward(self, x):
+        return x + self.cv3(self.cv2(self.cv1(x))) if self.add else self.cv3(self.cv2(self.cv1(x)))
+class CrossConv(nn.Module):
+    # Cross Convolution Downsample
+    def __init__(self, c1, c2, k=3, s=1, g=1, e=1.0, shortcut=False):
+        # ch_in, ch_out, kernel, stride, groups, expansion, shortcut
+        super().__init__()
+        c_ = int(c2 * e)  # hidden channels
+        self.cv1 = Conv(c1, c_, (1, k), (1, s))
+        self.cv2 = Conv(c_, c2, (k, 1), (s, 1), g=g)
+        self.add = shortcut and c1 == c2
+
+    def forward(self, x):
+        return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
+class C3(nn.Module):
+    # CSP Bottleneck with 3 convolutions 
+    def __init__(self, c1, c2, n=1, Involution=False,shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
+        super(C3, self).__init__()
+        c_ = int(c2 * e)  # hidden channels
+        self.cv1 = Conv(c1, c_, 1, 1) 
+        self.cv2 = Conv(c1, c_, 1, 1)
+        self.cv3 = Conv(2 * c_, c2, 1)  # act=FReLU(c2)
+        self.m = nn.Sequential(*((InvolutionBottleneck(c_, c_, shortcut, g, e=1.0) if(Involution) else Bottleneck(c_, c_, shortcut, g, e=1.0) )for _ in range(n))) 
+      
+    def forward(self, x):
+        return self.cv3(torch.cat((self.m(self.cv1(x)), self.cv2(x)), 1))
+
+
+class C3x(C3):
+    # C3 module with cross-convolutions
+    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):
+        super().__init__(c1, c2, n, shortcut, g, e)
+        c_ = int(c2 * e)
+        self.m = nn.Sequential(*(CrossConv(c_, c_, 3, 1, g, 1.0, shortcut) for _ in range(n)))
+
+
+class C3TR(C3):
+    # C3 module with TransformerBlock()
+    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):
+        super().__init__(c1, c2, n, shortcut, g, e)
+        c_ = int(c2 * e)
+        self.m = TransformerBlock(c_, c_, 4, n)
+        
+        
+class C3SPP(C3):
+    # C3 module with SPP()
+    def __init__(self, c1, c2, k=(5, 9, 13), n=1, shortcut=True, g=1, e=0.5):
+        super().__init__(c1, c2, n, shortcut, g, e)
+        c_ = int(c2 * e)
+        self.m = SPP(c_, c_, k)
+
+class C3Ghost(C3):
+    # C3 module with GhostBottleneck()
+    def __init__(self, c1, c2, n=1,Ivolution=False, shortcut=True, g=1, e=0.5):
+        super().__init__(c1, c2, n, Ivolution, shortcut, g, e)
+        c_ = int(c2 * e)  # hidden channels
+        self.m = nn.Sequential(*(GhostBottleneck(c_, c_) for _ in range(n)))
 class ResCSPA(BottleneckCSPA):
     # CSP https://github.com/WongKinYiu/CrossStagePartialNetworks
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
@@ -2017,3 +2397,140 @@ class ST2CSPC(nn.Module):
         return self.cv4(torch.cat((y1, y2), dim=1))
 
 ##### end of swin transformer v2 #####   
+
+class DecoupledHead(nn.Module):
+    def __init__(self, ch=256, nc=80,  anchors=()):
+        super().__init__()
+        self.nc = nc  # number of classes
+        self.nl = len(anchors)  # number of detection layers
+        self.na = len(anchors[0]) // 2  # number of anchors
+        self.merge = Conv(ch, 256 , 1, 1)
+        self.cls_convs1 = Conv(256 , 256 , 3, 1, 1)
+        self.cls_convs2 = Conv(256 , 256 , 3, 1, 1)
+        self.reg_convs1 = Conv(256 , 256 , 3, 1, 1)
+        self.reg_convs2 = Conv(256 , 256 , 3, 1, 1)
+        self.cls_preds = nn.Conv2d(256 , self.nc * self.na, 1)
+        self.reg_preds = nn.Conv2d(256 , 4 * self.na, 1)
+        self.obj_preds = nn.Conv2d(256 , 1 * self.na, 1)
+
+    def forward(self, x):
+        x = self.merge(x)
+        x1 = self.cls_convs1(x)
+        x1 = self.cls_convs2(x1)
+        x1 = self.cls_preds(x1)
+        x2 = self.reg_convs1(x)
+        x2 = self.reg_convs2(x2)
+        x21 = self.reg_preds(x2)
+        x22 = self.obj_preds(x2)
+        out = torch.cat([x21, x22, x1], 1)
+        return out
+    
+class ASFFV5(nn.Module):
+    def __init__(self, level, multiplier=1, rfb=False, vis=False, act_cfg=True):
+        """
+        ASFF version for YoloV5 .
+        different than YoloV3
+        multiplier should be 1, 0.5
+        which means, the channel of ASFF can be 
+        512, 256, 128 -> multiplier=1
+        256, 128, 64 -> multiplier=0.5
+        For even smaller, you need change code manually.
+        """
+        super(ASFFV5, self).__init__()
+        self.level = level
+        self.dim = [int(1024*multiplier), int(512*multiplier),
+                    int(256*multiplier)]
+        # print(self.dim)
+        
+        self.inter_dim = self.dim[self.level]
+        if level == 0:
+            self.stride_level_1 = Conv(int(512*multiplier), self.inter_dim, 3, 2)
+                
+            self.stride_level_2 = Conv(int(256*multiplier), self.inter_dim, 3, 2)
+                
+            self.expand = Conv(self.inter_dim, int(
+                1024*multiplier), 3, 1)
+        elif level == 1:
+            self.compress_level_0 = Conv(
+                int(1024*multiplier), self.inter_dim, 1, 1)
+            self.stride_level_2 = Conv(
+                int(256*multiplier), self.inter_dim, 3, 2)
+            self.expand = Conv(self.inter_dim, int(512*multiplier), 3, 1)
+        elif level == 2:
+            self.compress_level_0 = Conv(
+                int(1024*multiplier), self.inter_dim, 1, 1)
+            self.compress_level_1 = Conv(
+                int(512*multiplier), self.inter_dim, 1, 1)
+            self.expand = Conv(self.inter_dim, int(
+                256*multiplier), 3, 1)
+
+        # when adding rfb, we use half number of channels to save memory
+        compress_c = 8 if rfb else 16
+        self.weight_level_0 = Conv(
+            self.inter_dim, compress_c, 1, 1)
+        self.weight_level_1 = Conv(
+            self.inter_dim, compress_c, 1, 1)
+        self.weight_level_2 = Conv(
+            self.inter_dim, compress_c, 1, 1)
+
+        self.weight_levels = Conv(
+            compress_c*3, 3, 1, 1)
+        self.vis = vis
+
+    def forward(self, x): #l,m,s
+        """
+        # 128, 256, 512
+        512, 256, 128
+        from small -> large
+        """
+        x_level_0=x[2] #l
+        x_level_1=x[1] #m
+        x_level_2=x[0] #s
+        # print('x_level_0: ', x_level_0.shape)
+        # print('x_level_1: ', x_level_1.shape)
+        # print('x_level_2: ', x_level_2.shape)
+        if self.level == 0:
+            level_0_resized = x_level_0
+            level_1_resized = self.stride_level_1(x_level_1)
+            level_2_downsampled_inter = F.max_pool2d(
+                x_level_2, 3, stride=2, padding=1)
+            level_2_resized = self.stride_level_2(level_2_downsampled_inter)
+        elif self.level == 1:
+            level_0_compressed = self.compress_level_0(x_level_0)
+            level_0_resized = F.interpolate(
+                level_0_compressed, scale_factor=2, mode='nearest')
+            level_1_resized = x_level_1
+            level_2_resized = self.stride_level_2(x_level_2)
+        elif self.level == 2:
+            level_0_compressed = self.compress_level_0(x_level_0)
+            level_0_resized = F.interpolate(
+                level_0_compressed, scale_factor=4, mode='nearest')
+            x_level_1_compressed = self.compress_level_1(x_level_1)
+            level_1_resized = F.interpolate(
+                x_level_1_compressed, scale_factor=2, mode='nearest')
+            level_2_resized = x_level_2
+
+        # print('level: {}, l1_resized: {}, l2_resized: {}'.format(self.level,
+        #      level_1_resized.shape, level_2_resized.shape))
+        level_0_weight_v = self.weight_level_0(level_0_resized)
+        level_1_weight_v = self.weight_level_1(level_1_resized)
+        level_2_weight_v = self.weight_level_2(level_2_resized)
+        # print('level_0_weight_v: ', level_0_weight_v.shape)
+        # print('level_1_weight_v: ', level_1_weight_v.shape)
+        # print('level_2_weight_v: ', level_2_weight_v.shape)
+
+        levels_weight_v = torch.cat(
+            (level_0_weight_v, level_1_weight_v, level_2_weight_v), 1)
+        levels_weight = self.weight_levels(levels_weight_v)
+        levels_weight = F.softmax(levels_weight, dim=1)
+
+        fused_out_reduced = level_0_resized * levels_weight[:, 0:1, :, :] +\
+            level_1_resized * levels_weight[:, 1:2, :, :] +\
+            level_2_resized * levels_weight[:, 2:, :, :]
+
+        out = self.expand(fused_out_reduced)
+
+        if self.vis:
+            return out, levels_weight, fused_out_reduced.sum(dim=1)
+        else:
+            return out 

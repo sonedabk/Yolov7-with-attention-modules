@@ -753,13 +753,13 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
                  SPP, SPPF, SPPCSPC, GhostSPPCSPC, MixConv2d, Focus, Stem, GhostStem, CrossConv, 
                  Bottleneck, BottleneckCSPA, BottleneckCSPB, BottleneckCSPC, 
                  RepBottleneck, RepBottleneckCSPA, RepBottleneckCSPB, RepBottleneckCSPC,  
-                 Res, ResCSPA, ResCSPB, ResCSPC, 
+                 Res, ResCSPA, ResCSPB, ResCSPC, GhostBottleneck,
                  RepRes, RepResCSPA, RepResCSPB, RepResCSPC, 
                  ResX, ResXCSPA, ResXCSPB, ResXCSPC, 
                  RepResX, RepResXCSPA, RepResXCSPB, RepResXCSPC, 
                  Ghost, GhostCSPA, GhostCSPB, GhostCSPC,
                  SwinTransformerBlock, STCSPA, STCSPB, STCSPC,
-                 SwinTransformer2Block, ST2CSPA, ST2CSPB, ST2CSPC]:
+                 SwinTransformer2Block, ST2CSPA, ST2CSPB, ST2CSPC, C3, C3Ghost, C3x, C3TR]:
             c1, c2 = ch[f], args[0]
             if c2 != no:  # if not output
                 c2 = make_divisible(c2 * gw, 8)
@@ -768,13 +768,13 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             if m in [DownC, SPPCSPC, GhostSPPCSPC, 
                      BottleneckCSPA, BottleneckCSPB, BottleneckCSPC, 
                      RepBottleneckCSPA, RepBottleneckCSPB, RepBottleneckCSPC, 
-                     ResCSPA, ResCSPB, ResCSPC, 
+                     ResCSPA, ResCSPB, ResCSPC, GhostBottleneck,
                      RepResCSPA, RepResCSPB, RepResCSPC, 
                      ResXCSPA, ResXCSPB, ResXCSPC, 
                      RepResXCSPA, RepResXCSPB, RepResXCSPC,
                      GhostCSPA, GhostCSPB, GhostCSPC,
                      STCSPA, STCSPB, STCSPC,
-                     ST2CSPA, ST2CSPB, ST2CSPC]:
+                     ST2CSPA, ST2CSPB, ST2CSPC, C3Ghost]:
                 args.insert(2, n)  # number of repeats
                 n = 1
         elif m is nn.BatchNorm2d:
@@ -799,7 +799,9 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             c2 = ch[f] // args[0] ** 2
         else:
             c2 = ch[f]
-
+            
+        if m in [C3Ghost]:
+            print(args)
         m_ = nn.Sequential(*[m(*args) for _ in range(n)]) if n > 1 else m(*args)  # module
         t = str(m)[8:-2].replace('__main__.', '')  # module type
         np = sum([x.numel() for x in m_.parameters()])  # number params
